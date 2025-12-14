@@ -1,5 +1,6 @@
+
 import React, { useState, useEffect } from 'react';
-import { Shield, Trash2, Ban, Search, Gift, Crown, ArrowLeft, RefreshCw, CheckCircle, Megaphone, Edit3, Send, Home, XCircle, Flame, Image as ImageIcon, Plus, X, Database, Clock, Gamepad2, BadgeCheck, Coins, Trophy, Ghost, Lock, Unlock, Percent, AlertTriangle, MessageCircle, Sparkles, Check, X as XIcon, Gavel, MinusCircle, Upload, Save } from 'lucide-react';
+import { Shield, Trash2, Ban, Search, Gift, Crown, ArrowLeft, RefreshCw, CheckCircle, Megaphone, Edit3, Send, Home, XCircle, Flame, Image as ImageIcon, Plus, X, Database, Clock, Gamepad2, BadgeCheck, Coins, Trophy, Ghost, Lock, Unlock, Percent, AlertTriangle, MessageCircle, Sparkles, Check, X as XIcon, Gavel, MinusCircle, Upload, Save, Layers } from 'lucide-react';
 import { getAllUsers, adminUpdateUser, deleteAllRooms, sendSystemNotification, broadcastOfficialMessage, searchUserByDisplayId, getRoomsByHostId, adminBanRoom, deleteRoom, toggleRoomHotStatus, toggleRoomActivitiesStatus, addBanner, deleteBanner, listenToBanners, syncRoomIdsWithUserIds, toggleRoomOfficialStatus, resetAllUsersCoins, resetAllRoomCups, resetAllGhostUsers, updateRoomGameConfig, resetAllChats, deleteUserProfile, listenToWelcomeRequests, approveWelcomeRequest, rejectWelcomeRequest, addSvgaGift, addSvgaStoreItem, listenToDynamicGifts, deleteGift, updateGift } from '../services/firebaseService';
 import { Language, User, Room, Banner, WelcomeRequest, Gift as GiftType, StoreItem } from '../types';
 import { VIP_TIERS, ADMIN_ROLES } from '../constants';
@@ -28,6 +29,11 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, language }) => 
 
   // SVGA Panel State
   const [svgaType, setSvgaType] = useState<'gift' | 'entry' | 'frame'>('gift');
+  
+  // Gift Specific Options
+  const [giftTabType, setGiftTabType] = useState<'static' | 'animated'>('static');
+  const [giftCategoryType, setGiftCategoryType] = useState<'standard' | 'cp'>('standard');
+
   const [svgaName, setSvgaName] = useState('');
   const [svgaPrice, setSvgaPrice] = useState('');
   const [svgaIcon, setSvgaIcon] = useState('');
@@ -278,10 +284,11 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, language }) => 
   };
 
   const handleAddSvgaItem = async () => {
-      if (!svgaName || !svgaPrice || !svgaIcon || !svgaFileUrl) {
-          alert("يرجى ملء جميع الحقول");
+      if (!svgaName || !svgaPrice || !svgaIcon) {
+          alert("يرجى ملء الاسم والسعر والصورة");
           return;
       }
+      // Note: svgaFileUrl is optional if it's just a static image gift
       
       setActionLoading('svga_add');
       try {
@@ -289,11 +296,11 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, language }) => 
               const newGift: GiftType = {
                   id: 'dynamic_gift_' + Date.now(),
                   name: svgaName,
-                  icon: svgaIcon,
+                  icon: svgaIcon, // Base64
                   cost: parseInt(svgaPrice),
-                  type: 'animated',
-                  category: 'standard',
-                  svgaUrl: svgaFileUrl
+                  type: giftTabType, // 'static' or 'animated'
+                  category: giftCategoryType, // 'standard' or 'cp'
+                  svgaUrl: svgaFileUrl || undefined // Optional URL
               };
               await addSvgaGift(newGift);
           } else {
@@ -303,12 +310,9 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, language }) => 
                   name: { ar: svgaName, en: svgaName },
                   price: parseInt(svgaPrice),
                   currency: 'diamonds', // Default to diamonds for premium
-                  previewClass: '', // CSS class not needed if image provided? Actually existing logic uses previewClass. For custom items, we might need to handle image display differently in StoreView.
-                  svgaUrl: svgaFileUrl
+                  previewClass: '', 
+                  svgaUrl: svgaFileUrl || svgaIcon // If no SVGA, fallback to Icon? Usually frames need special handling.
               };
-              // Hack: Reuse previewClass to store icon URL if needed or handle logic in StoreView to prioritize image
-              // Since existing store uses CSS classes for frames, we'll need to update StoreView to check if it's dynamic.
-              // For now, let's assume standard behavior.
               await addSvgaStoreItem(newItem);
           }
           alert("تمت الإضافة بنجاح!");
@@ -437,6 +441,33 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, language }) => 
                       </div>
                   </div>
 
+                  {svgaType === 'gift' && (
+                      <div className="grid grid-cols-2 gap-4">
+                          <div>
+                              <label className="text-xs text-gray-400 mb-1 block">تصنيف الهدية (Tab)</label>
+                              <select 
+                                value={giftTabType} 
+                                onChange={(e) => setGiftTabType(e.target.value as any)}
+                                className="w-full bg-black border border-gray-700 rounded-lg p-2 text-white text-xs outline-none"
+                              >
+                                  <option value="static">Classic (Static)</option>
+                                  <option value="animated">Animated</option>
+                              </select>
+                          </div>
+                          <div>
+                              <label className="text-xs text-gray-400 mb-1 block">فئة الهدية (Category)</label>
+                              <select 
+                                value={giftCategoryType} 
+                                onChange={(e) => setGiftCategoryType(e.target.value as any)}
+                                className="w-full bg-black border border-gray-700 rounded-lg p-2 text-white text-xs outline-none"
+                              >
+                                  <option value="standard">Standard</option>
+                                  <option value="cp">CP</option>
+                              </select>
+                          </div>
+                      </div>
+                  )}
+
                   <div>
                       <label className="text-xs text-gray-400 mb-1 block">صورة الهدية/العنصر (Icon)</label>
                       <label className="w-full h-20 bg-black border border-gray-700 border-dashed rounded-lg flex items-center justify-center cursor-pointer hover:border-cyan-500">
@@ -453,7 +484,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, language }) => 
                   </div>
 
                   <div>
-                      <label className="text-xs text-gray-400 mb-1 block">ملف الحركة (Animation Source)</label>
+                      <label className="text-xs text-gray-400 mb-1 block">ملف الحركة (Animation Source - Optional)</label>
                       <label className="w-full h-20 bg-black border border-gray-700 border-dashed rounded-lg flex items-center justify-center cursor-pointer hover:border-cyan-500">
                           <input type="file" className="hidden" accept=".svga,image/gif,image/webp,image/png" onChange={handleSvgaFileUpload} />
                           {svgaFileUrl ? (
@@ -465,7 +496,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, language }) => 
                               </div>
                           )}
                       </label>
-                      <p className="text-[9px] text-gray-500 mt-1">يمكنك رفع ملف SVGA أصلي أو صورة متحركة (GIF/WebP).</p>
+                      <p className="text-[9px] text-gray-500 mt-1">يمكنك رفع ملف SVGA أصلي أو صورة متحركة (GIF/WebP). إذا تركت فارغاً، سيتم استخدام الأيقونة.</p>
                   </div>
 
                   <div className="grid grid-cols-2 gap-4">
@@ -484,7 +515,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, language }) => 
                       disabled={actionLoading === 'svga_add'}
                       className="w-full bg-cyan-600 hover:bg-cyan-500 text-white font-bold py-3 rounded-xl shadow-lg mt-4 flex items-center justify-center gap-2 disabled:opacity-50"
                   >
-                      {actionLoading === 'svga_add' ? 'جاري الإضافة...' : 'نعم - إضافة للمتجر'}
+                      {actionLoading === 'svga_add' ? 'جاري الإضافة...' : 'نعم - إضافة للمتجر/الهدايا'}
                   </button>
               </div>
 
@@ -516,11 +547,20 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, language }) => 
                               ) : (
                                   <>
                                       <div className="flex justify-center mb-2">
-                                          <img src={gift.icon} className="w-10 h-10 object-contain"/>
+                                          {/* Use same rendering logic as RoomView for consistency */}
+                                          {(gift.svgaUrl || gift.icon.startsWith('data:') || gift.icon.startsWith('http')) ? (
+                                              <img src={gift.icon} className="w-10 h-10 object-contain"/>
+                                          ) : (
+                                              <span className="text-2xl">{gift.icon}</span>
+                                          )}
                                       </div>
                                       <div className="text-center">
                                           <p className="text-white font-bold text-xs truncate">{gift.name}</p>
                                           <p className="text-yellow-400 text-[10px] font-mono">{gift.cost} 💎</p>
+                                          <div className="flex gap-1 justify-center mt-1">
+                                              <span className="text-[8px] bg-gray-700 px-1 rounded text-gray-300">{gift.type}</span>
+                                              <span className="text-[8px] bg-gray-700 px-1 rounded text-gray-300">{gift.category}</span>
+                                          </div>
                                       </div>
                                       <div className="absolute top-1 right-1 flex gap-1">
                                           <button 
@@ -532,6 +572,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, language }) => 
                                           <button 
                                               onClick={() => handleDeleteGift(gift.id)} 
                                               className="bg-red-600/20 text-red-400 p-1 rounded hover:bg-red-600/40"
+                                              title="حذف (Trash)"
                                           >
                                               <Trash2 className="w-3 h-3"/>
                                           </button>
@@ -549,7 +590,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack, language }) => 
       {/* ... Other Tabs (Agencies, Welcome, Banners, Official, System) kept same ... */}
       
       {/* Modals (Ban, Gift, Deduct, ID, VIP) - reused from original code */}
-      {/* Assuming standard modal implementations here for brevity */}
       {showGiftModal && (
           <div className="absolute inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
               <div className="bg-gray-900 border border-blue-500 rounded-xl p-5 w-full max-w-xs text-right">

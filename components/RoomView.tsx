@@ -589,7 +589,8 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
                   <div className="flex-1 overflow-y-auto grid grid-cols-4 gap-3 pb-2 content-start custom-scrollbar">
                       {filteredGifts.map(gift => (
                           <button key={gift.id} onClick={() => setSelectedGift(gift)} disabled={isSendingGift} className={`flex flex-col items-center p-2 rounded-xl border transition relative group ${selectedGift?.id === gift.id ? 'border-brand-500 bg-brand-500/10' : 'border-transparent hover:bg-white/5'} ${isSendingGift ? 'opacity-50 cursor-not-allowed' : ''}`}>
-                              {gift.svgaUrl ? (
+                              {/* RENDER GIFTS CORRECTLY: Use Image if svgaUrl/Base64/HTTP, else Text Emoji */}
+                              {(gift.svgaUrl || gift.icon.startsWith('data:') || gift.icon.startsWith('http')) ? (
                                   <img src={gift.icon} className={`w-10 h-10 object-contain mb-1 transition ${selectedGift?.id === gift.id ? 'scale-110' : 'group-hover:scale-105'}`} />
                               ) : (
                                   <span className={`text-4xl mb-1 filter drop-shadow-md transition ${selectedGift?.id === gift.id ? 'scale-110' : 'group-hover:scale-105'}`}>{gift.icon}</span>
