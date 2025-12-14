@@ -135,11 +135,8 @@ const HomeView: React.FC<HomeViewProps> = ({ rooms, onJoinRoom, language, userPr
   const displayedRooms = getFilteredRooms();
 
   const handleCreateRoomClick = () => {
-      if (userProfile?.canCreateRoom) {
-          setShowCreateModal(true);
-      } else {
-          alert(t('contactAdmin'));
-      }
+      // Allow everyone to open modal, removed check
+      setShowCreateModal(true);
   };
 
   const handleCreateRoom = async () => {

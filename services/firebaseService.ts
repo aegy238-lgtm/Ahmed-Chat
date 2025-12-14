@@ -175,7 +175,7 @@ export const createUserProfile = async (uid: string, data: Partial<User>) => {
     visitorsCount: 0,
     isAdmin: false,
     adminRole: null,
-    canCreateRoom: false, // Default: creating rooms is locked
+    canCreateRoom: true, // Default: creating rooms is OPEN by default
     dailyProfit: 0,
     lastDailyReset: Date.now(),
     isWelcomeAgent: false,

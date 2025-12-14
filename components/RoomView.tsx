@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef, memo } from 'react';
 import { ArrowLeft, Send, Heart, Share2, Gift as GiftIcon, Users, Crown, Mic, MicOff, Lock, Unlock, Settings, Image as ImageIcon, X, Info, Minimize2, LogOut, BadgeCheck, Loader2, Upload, Shield, Trophy, Bot, Volume2, VolumeX, ArrowDownCircle, Ban, Trash2, UserCog, UserMinus, Zap, BarChart3, Gamepad2, Clock, LayoutGrid, ListMusic, Plus, Check, Search, Circle, CheckCircle2, KeyRound, MoreVertical, Grid, Sprout, Car, RotateCw, Coins, History, Hand, Hexagon, Play, Pause, SkipForward, SkipBack, Music, Flag, HeartHandshake, Film, RefreshCw, FileText } from 'lucide-react';
 import { Room, ChatMessage, Gift, Language, User, RoomSeat, WealthTransaction, StoreItem } from '../types';
@@ -13,7 +14,8 @@ import FullProfileView from './FullProfileView';
 import { FruitWarGame } from './FruitWarGame';
 
 const SeatItem = memo(({ seat, isSpeaking, isLoading, onClick, isHostSeat, isRoomAdmin, frameItem }: any) => {
-    const sizeClass = isHostSeat ? "w-16 h-16" : "w-[50px] h-[50px]";
+    // INCREASED SIZE HERE: Host 80px (w-20), User 62px (custom)
+    const sizeClass = isHostSeat ? "w-20 h-20" : "w-[62px] h-[62px]";
     
     // Determine frame styles
     const isImageFrame = !!frameItem?.svgaUrl;
@@ -469,7 +471,8 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
                  />
              ))}
           </div>
-          <div className="grid grid-cols-5 gap-y-3 gap-x-2 justify-items-center w-full max-w-sm shrink-0">
+          {/* INCREASED GAP IN GRID */}
+          <div className="grid grid-cols-5 gap-y-5 gap-x-3 justify-items-center w-full max-w-sm shrink-0">
              {seats.slice(1).map((seat) => (
                  <SeatItem 
                     key={seat.index} 
