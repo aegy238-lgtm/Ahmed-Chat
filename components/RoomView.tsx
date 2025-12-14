@@ -1,9 +1,10 @@
 
+// ... existing imports ...
 import React, { useState, useEffect, useRef, memo } from 'react';
-import { ArrowLeft, Send, Heart, Share2, Gift as GiftIcon, Users, Crown, Mic, MicOff, Lock, Unlock, Settings, Image as ImageIcon, X, Info, Minimize2, LogOut, BadgeCheck, Loader2, Upload, Shield, Trophy, Bot, Volume2, VolumeX, ArrowDownCircle, Ban, Trash2, UserCog, UserMinus, Zap, BarChart3, Gamepad2, Clock, LayoutGrid, ListMusic, Plus, Check, Search, Circle, CheckCircle2, KeyRound, MoreVertical, Grid, Sprout, Car, RotateCw, Coins, History, Hand, Hexagon, Play, Pause, SkipForward, SkipBack, Music, Flag, HeartHandshake, Film, RefreshCw, FileText } from 'lucide-react';
+import { ArrowLeft, Send, Heart, Share2, Gift as GiftIcon, Users, Crown, Mic, MicOff, Lock, Unlock, Settings, Image as ImageIcon, X, Info, Minimize2, LogOut, BadgeCheck, Loader2, Upload, Shield, Trophy, Bot, Volume2, VolumeX, ArrowDownCircle, Ban, Trash2, UserCog, UserMinus, Zap, BarChart3, Gamepad2, Clock, LayoutGrid, ListMusic, Plus, Check, Search, Circle, CheckCircle2, KeyRound, MoreVertical, Grid, Sprout, Car, RotateCw, Coins, History, Hand, Hexagon, Play, Pause, SkipForward, SkipBack, Music, Flag, HeartHandshake, Film, RefreshCw, FileText, Copy, AlertTriangle, Disc } from 'lucide-react';
 import { Room, ChatMessage, Gift, Language, User, RoomSeat, WealthTransaction, StoreItem } from '../types';
 import { GIFTS, STORE_ITEMS, ROOM_BACKGROUNDS, VIP_TIERS, ADMIN_ROLES } from '../constants';
-import { listenToMessages, sendMessage, takeSeat, leaveSeat, updateRoomDetails, sendGiftTransaction, toggleSeatLock, toggleSeatMute, decrementViewerCount, listenToRoom, kickUserFromSeat, banUserFromRoom, unbanUserFromRoom, removeRoomAdmin, addRoomAdmin, searchUserByDisplayId, enterRoom, exitRoom, listenToRoomViewers, getUserProfile, changeRoomSeatCount, updateWalletForGame, distributeRoomWealth, getRoomWealthHistory, listenToDynamicGifts, listenToDynamicStoreItems } from '../services/firebaseService';
+import { listenToMessages, sendMessage, takeSeat, leaveSeat, updateRoomDetails, sendGiftTransaction, toggleSeatLock, toggleSeatMute, decrementViewerCount, listenToRoom, kickUserFromSeat, banUserFromRoom, unbanUserFromRoom, removeRoomAdmin, addRoomAdmin, searchUserByDisplayId, enterRoom, exitRoom, listenToRoomViewers, getUserProfile, changeRoomSeatCount, updateWalletForGame, distributeRoomWealth, getRoomWealthHistory, listenToDynamicGifts, listenToDynamicStoreItems, moveSeat, deleteRoom } from '../services/firebaseService';
 import { joinVoiceChannel, leaveVoiceChannel, toggleMicMute, publishMicrophone, unpublishMicrophone, toggleAllRemoteAudio, listenToVolume, playMusicFile, stopMusic, setMusicVolume, seekMusic, pauseMusic, resumeMusic, getMusicTrack, preloadMicrophone } from '../services/agoraService';
 import { generateAiHostResponse } from '../services/geminiService';
 import { compressImage } from '../services/imageService';
@@ -102,6 +103,7 @@ interface RoomViewProps {
 }
 
 export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUser, onAction, language }) => {
+  // ... (keep existing state hooks) ...
   const [room, setRoom] = useState<Room>(initialRoom);
   
   // Dynamic Content State
@@ -173,29 +175,64 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
   const [showWealthHistory, setShowWealthHistory] = useState(false);
   const [wealthHistory, setWealthHistory] = useState<WealthTransaction[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
+  const [isProcessingSeat, setIsProcessingSeat] = useState(false); // Global seat action lock
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatInputRef = useRef<HTMLInputElement>(null);
   const joinTimestamp = useRef(Date.now());
   const hasSentJoinMsg = useRef(false);
   const currentUserRef = useRef(currentUser);
 
-  // --- SEAT VARIABLES & HANDLERS ---
+  // ... (keep seat handlers and effects as is) ...
   const seats = room.seats || [];
   const activeSeats = seats.filter(s => s.userId);
   const mySeat = seats.find(s => s.userId === currentUser.id);
 
+  // ... (keep rest of logic) ...
   const handleSeatClick = async (index: number, userId: string | null) => {
+      // ... (logic for taking seat) ...
+      if (isProcessingSeat) return; // Prevent concurrent actions
+
       if (userId) {
           // Open profile
           const seat = seats[index];
           setSelectedUser(seat);
       } else {
-          // Take seat logic
+          // Empty Seat Logic
           if (mySeat) {
-              alert(language === 'ar' ? 'أنت بالفعل على المقعد' : 'You are already on a seat');
+              // User is ALREADY on a seat, try to MOVE
+              const isTargetLocked = seats[index].isLocked;
+              const isHost = room.hostId === currentUser.id;
+              const isAdmin = room.admins?.includes(currentUser.uid || '');
+              
+              if (isTargetLocked && !isHost && !isAdmin) {
+                  alert(language === 'ar' ? 'المقعد مقفل' : 'Seat is locked');
+                  return;
+              }
+
+              setIsProcessingSeat(true);
+              // --- OPTIMISTIC UI UPDATE: Move Instantly ---
+              const updatedSeats = [...seats];
+              // Clear old seat
+              updatedSeats[mySeat.index] = { ...mySeat, userId: null, userName: null, userAvatar: null, frameId: null, giftCount: 0, vipLevel: 0 };
+              // Fill new seat
+              updatedSeats[index] = { ...seats[index], userId: currentUser.id, userName: currentUser.name, userAvatar: currentUser.avatar, frameId: currentUser.equippedFrame, vipLevel: currentUser.vipLevel };
+              
+              setRoom(prev => ({ ...prev, seats: updatedSeats })); // Update Local State Immediately
+
+              // Background Server Call
+              try {
+                  if (currentUser.uid) {
+                      await moveSeat(room.id, mySeat.index, index, currentUser);
+                  }
+              } catch (e: any) {
+                  console.error(e);
+              } finally {
+                  setIsProcessingSeat(false);
+              }
               return;
           }
           
+          // User is NOT on a seat, try to TAKE
           const isSeatLocked = seats[index].isLocked;
           const isHost = room.hostId === currentUser.id;
           const isAdmin = room.admins?.includes(currentUser.uid || '');
@@ -205,20 +242,131 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
               return;
           }
 
-          setLoadingSeatIndex(index);
+          setIsProcessingSeat(true);
+
+          // --- OPTIMISTIC UI UPDATE: Take Seat Instantly ---
+          const updatedSeats = [...seats];
+          updatedSeats[index] = { 
+              ...seats[index], 
+              userId: currentUser.id, 
+              userName: currentUser.name, 
+              userAvatar: currentUser.avatar, 
+              frameId: currentUser.equippedFrame, 
+              vipLevel: currentUser.vipLevel 
+          };
+          setRoom(prev => ({ ...prev, seats: updatedSeats })); // Instant Update
+
+          // Background Server Call
           try {
               if (currentUser.uid) {
                   await takeSeat(room.id, index, currentUser);
                   // Join Voice Channel & Unmute by default
                   await joinVoiceChannel(room.id, currentUser.uid);
-                  await publishMicrophone(true); // Start muted or unmuted depending on preference
+                  await publishMicrophone(true); 
               }
           } catch (e: any) {
               console.error(e);
               alert(language === 'ar' ? 'فشل صعود المايك' : 'Failed to take seat');
           } finally {
-              setLoadingSeatIndex(null);
+              setIsProcessingSeat(false);
           }
+      }
+  };
+
+  // ... (keep handleMicToggle, handleSpeakerToggle, handleConfirmExit, etc.) ...
+  const handleMicToggle = async () => {
+      // Optimistic Mic Toggle
+      if (mySeat) {
+          const updatedSeats = [...seats];
+          updatedSeats[mySeat.index] = { ...mySeat, isMuted: !mySeat.isMuted };
+          setRoom(prev => ({ ...prev, seats: updatedSeats })); // Instant UI Update
+          
+          // Hardware Mute
+          await toggleMicMute(!mySeat.isMuted); 
+          // Server Update
+          await toggleSeatMute(room.id, mySeat.index, !mySeat.isMuted);
+      }
+  };
+
+  const handleSpeakerToggle = () => {
+      const newState = !isSpeakerMuted;
+      setIsSpeakerMuted(newState);
+      toggleAllRemoteAudio(newState); // Actual Agora Mute
+  };
+
+  const handleConfirmExit = async () => {
+      try {
+          if (mySeat) {
+              await leaveSeat(room.id, currentUser);
+              await toggleMicMute(true);
+              await leaveVoiceChannel();
+          }
+          if (room.hostId === currentUser.id) {
+              await deleteRoom(room.id);
+          } else {
+              if (currentUser.uid) {
+                  await exitRoom(room.id, currentUser.uid);
+              }
+          }
+          onAction('leave');
+      } catch (e) {
+          console.error("Exit failed", e);
+          onAction('leave');
+      }
+      setShowExitModal(false);
+  };
+
+  const handleSaveSettings = async () => {
+      if (!room.id) return;
+      try {
+          await updateRoomDetails(room.id, {
+              title: editTitle,
+              description: editDesc,
+              isLocked: !!newRoomPassword,
+              password: newRoomPassword,
+          });
+          alert(language === 'ar' ? 'تم حفظ الإعدادات' : 'Settings Saved');
+          setShowRoomSettings(false);
+      } catch (e) {
+          alert('Error saving settings');
+      }
+  };
+
+  const handleRoomBackgroundUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (file) {
+          try {
+              const base64 = await compressImage(file, 720, 0.5); 
+              if (base64.length > 950000) throw new Error("Image still too large after compression");
+              setRoom(prev => ({ ...prev, backgroundImage: base64, backgroundType: 'image' }));
+              await updateRoomDetails(room.id, { backgroundImage: base64, backgroundType: 'image' });
+          } catch (e: any) {
+              console.error("Failed to update background", e);
+              alert(language === 'ar' ? 'فشل تحديث الخلفية: الصورة كبيرة جداً' : 'Failed to update background: Image too large');
+          }
+      }
+  };
+
+  const handleSendMessage = async () => {
+      if (!inputValue.trim() || !currentUser.uid) return;
+      const text = inputValue.trim();
+      setInputValue(''); 
+      const newMessage: ChatMessage = {
+          id: Date.now().toString(),
+          userId: currentUser.id,
+          userName: currentUser.name,
+          userAvatar: currentUser.avatar,
+          text: text,
+          timestamp: Date.now(),
+          frameId: currentUser.equippedFrame,
+          bubbleId: currentUser.equippedBubble,
+          vipLevel: currentUser.vipLevel,
+          adminRole: currentUser.adminRole
+      };
+      try {
+          await sendMessage(room.id, newMessage);
+      } catch (e) {
+          console.error("Failed to send message", e);
       }
   };
 
@@ -230,69 +378,6 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
           setFloatingHearts(prev => prev.filter(h => h.id !== id));
       }, 4000);
   };
-  // ---------------------------------
-
-  // Load Dynamic Data (Gifts & Store Items for Frames)
-  useEffect(() => {
-      const unsubGifts = listenToDynamicGifts((dynamicGifts) => {
-          setAllGifts([...GIFTS, ...dynamicGifts]);
-      });
-      const unsubStore = listenToDynamicStoreItems((dynamicItems) => {
-          setStoreItems([...STORE_ITEMS, ...dynamicItems]);
-      });
-      return () => {
-          unsubGifts();
-          unsubStore();
-      };
-  }, []);
-
-  // ... (Refs and standard effects) ...
-  useEffect(() => { currentUserRef.current = currentUser; }, [currentUser]);
-
-  // Handle Dynamic Effects (SVGA) Rendering
-  const playDynamicEffect = (url: string) => {
-      const id = Date.now().toString() + Math.random();
-      setDynamicEffects(prev => [...prev, { id, url }]);
-      setTimeout(() => {
-          setDynamicEffects(prev => prev.filter(e => e.id !== id));
-      }, 5000); // 5 seconds duration for effect
-  };
-
-  // ... (T function and other effects) ...
-  const t = (key: string) => {
-      const dict: Record<string, { ar: string, en: string }> = {
-          placeholder: { ar: 'اكتب رسالة...', en: 'Type a message...' },
-          pinned: { ar: 'أهلاً بك في فليكس فن! يرجى الالتزام بالاحترام المتبادل.', en: 'Welcome to Flex Fun!' },
-          roomDesc: { ar: 'وصف الغرفة / القوانين', en: 'Room Rules / Description' },
-          gift: { ar: 'إهداء', en: 'Send Gift' },
-          send: { ar: 'إرسال', en: 'Send' },
-          selectGift: { ar: 'اختر هدية', en: 'Select a gift' },
-          selectTarget: { ar: 'اختر مستلم الهدية', en: 'Select gift recipient' },
-          noFunds: { ar: 'رصيد غير كاف', en: 'Insufficient funds' },
-          everyone: { ar: 'الجميع', en: 'Everyone' },
-          standard: { ar: 'عادي', en: 'Standard' },
-          cp: { ar: 'CP', en: 'CP' },
-          cup: { ar: 'الكأس', en: 'Cup' },
-          onMic: { ar: 'على المايك', en: 'On Mic' }
-      };
-      return dict[key]?.[language] || key;
-  };
-
-  // Helper for Bubble Class
-  const getBubbleClass = (id?: string | null) => { 
-      if (!id) return 'bg-white/10 text-white rounded-2xl'; 
-      const item = storeItems.find(i => i.id === id); 
-      return item?.previewClass ? `${item.previewClass} rounded-2xl` : 'bg-white/10 text-white rounded-2xl'; 
-  };
-  
-  // Helper for Frame Class in Chat (small avatar)
-  const getChatFrameClass = (id?: string | null) => {
-      if (!id) return 'border border-white/20';
-      const item = storeItems.find(i => i.id === id);
-      return item?.previewClass || 'border border-white/20';
-  };
-
-  // ... (Agora and Listeners logic) ...
 
   useEffect(() => {
      if (!room || !room.id) return;
@@ -304,11 +389,8 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
          const now = Date.now();
          if (latestMsg && (now - latestMsg.timestamp < 3000)) {
              if (latestMsg.isJoin && (!joinNotification || joinNotification.id !== latestMsg.id)) { setJoinNotification({ name: latestMsg.userName, id: latestMsg.id }); setTimeout(() => setJoinNotification(null), 3000); }
-             
-             // Handle Gift Animations (Standard & Dynamic)
              if (latestMsg.isGift) {
                  if (latestMsg.svgaUrl) {
-                     // Play SVGA/Dynamic Effect
                      playDynamicEffect(latestMsg.svgaUrl);
                  } else if (latestMsg.giftType === 'animated' && latestMsg.giftIcon) {
                      triggerAnimation(latestMsg.giftIcon, latestMsg.text.includes('Rocket') ? 'animate-fly-up' : 'animate-bounce-in');
@@ -330,18 +412,18 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
     const totalCost = selectedGift.cost * multiplier * (giftTargets.includes('all') ? activeSeats.length : targets.length);
     const userBalance = currentUser.wallet?.diamonds || 0;
     if (userBalance < totalCost) { alert(t('noFunds')); return; }
+    
     setIsSendingGift(true);
-    try {
-        const promises = targets.map(seat => sendGiftTransaction(room.id, currentUser.uid!, seat.index, selectedGift.cost * multiplier, selectedGift.id));
-        await Promise.all(promises);
-        
-        // CLOSE PANEL HERE IMMEDIATELY AFTER SUCCESSFUL TRANSACTION
-        setShowGiftPanel(false); 
 
-        let targetName = ''; if (giftTargets.includes('all')) targetName = t('everyone'); else if (targets.length === 1) targetName = targets[0].userName || 'User'; else targetName = `${targets.length} Users`;
+    try {
+        setShowGiftPanel(false);
+        let targetName = ''; 
+        if (giftTargets.includes('all')) targetName = t('everyone'); 
+        else if (targets.length === 1) targetName = targets[0].userName || 'User'; 
+        else targetName = `${targets.length} Users`;
         
         const giftMsg: ChatMessage = { 
-            id: Date.now().toString(), 
+            id: 'optimistic_' + Date.now().toString(), 
             userId: currentUser.id, 
             userName: currentUser.name, 
             userAvatar: currentUser.avatar || 'https://picsum.photos/200', 
@@ -349,7 +431,7 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
             isGift: true, 
             giftType: selectedGift.type, 
             giftIcon: selectedGift.icon, 
-            svgaUrl: selectedGift.svgaUrl, // Include SVGA URL in message
+            svgaUrl: selectedGift.svgaUrl, 
             timestamp: Date.now(), 
             frameId: currentUser.equippedFrame || null, 
             bubbleId: currentUser.equippedBubble || null, 
@@ -357,7 +439,6 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
             adminRole: currentUser.adminRole || null 
         };
         setMessages(prev => [giftMsg, ...prev]); 
-        sendMessage(room.id, giftMsg); // Don't await to keep UI responsive
         
         if (selectedGift.svgaUrl) {
             playDynamicEffect(selectedGift.svgaUrl);
@@ -366,8 +447,18 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
         } else {
             triggerFloatingHeart();
         }
-        // Panel closed earlier
-    } catch (e: any) { const msg = typeof e === 'string' ? e : (e.message || ''); if (msg.includes("Insufficient funds")) alert(t('noFunds')); } finally { setIsSendingGift(false); }
+
+        sendMessage(room.id, { ...giftMsg, id: Date.now().toString() }); 
+        const promises = targets.map(seat => sendGiftTransaction(room.id, currentUser.uid!, seat.index, selectedGift.cost * multiplier, selectedGift.id));
+        await Promise.all(promises);
+        
+    } catch (e: any) { 
+        const msg = typeof e === 'string' ? e : (e.message || ''); 
+        if (msg.includes("Insufficient funds")) alert(t('noFunds')); 
+        else console.error(e);
+    } finally { 
+        setIsSendingGift(false); 
+    }
   };
 
   const triggerAnimation = (icon: string, animationClass: string = '') => {
@@ -378,7 +469,94 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
       }, 3000);
   };
 
-  // Filter gifts
+  const handleShareRoom = () => {
+      const shareText = `Join me in room ${room.title} (ID: ${room.displayId}) on Flex Fun!`;
+      if (navigator.clipboard) {
+          navigator.clipboard.writeText(shareText);
+          alert(t('copied'));
+      }
+      setShowOptionsMenu(false);
+  };
+
+  const handleClearChat = () => {
+      setMessages([]);
+      setShowOptionsMenu(false);
+  };
+
+  useEffect(() => {
+      const unsubGifts = listenToDynamicGifts((dynamicGifts) => {
+          setAllGifts([...GIFTS, ...dynamicGifts]);
+      });
+      const unsubStore = listenToDynamicStoreItems((dynamicItems) => {
+          setStoreItems([...STORE_ITEMS, ...dynamicItems]);
+      });
+      return () => {
+          unsubGifts();
+          unsubStore();
+      };
+  }, []);
+
+  useEffect(() => { currentUserRef.current = currentUser; }, [currentUser]);
+
+  const playDynamicEffect = (url: string) => {
+      const id = Date.now().toString() + Math.random();
+      setDynamicEffects(prev => [...prev, { id, url }]);
+      setTimeout(() => {
+          setDynamicEffects(prev => prev.filter(e => e.id !== id));
+      }, 5000); 
+  };
+
+  const t = (key: string) => {
+      const dict: Record<string, { ar: string, en: string }> = {
+          placeholder: { ar: 'اكتب رسالة...', en: 'Type a message...' },
+          pinned: { ar: 'أهلاً بك في فليكس فن! يرجى الالتزام بالاحترام المتبادل.', en: 'Welcome to Flex Fun!' },
+          roomDesc: { ar: 'وصف الغرفة / القوانين', en: 'Room Rules / Description' },
+          gift: { ar: 'إهداء', en: 'Send Gift' },
+          send: { ar: 'إرسال', en: 'Send' },
+          selectGift: { ar: 'اختر هدية', en: 'Select a gift' },
+          selectTarget: { ar: 'اختر مستلم الهدية', en: 'Select gift recipient' },
+          noFunds: { ar: 'رصيد غير كاف', en: 'Insufficient funds' },
+          everyone: { ar: 'الجميع', en: 'Everyone' },
+          standard: { ar: 'عادي', en: 'Standard' },
+          cp: { ar: 'CP', en: 'CP' },
+          cup: { ar: 'الكأس', en: 'Cup' },
+          onMic: { ar: 'على المايك', en: 'On Mic' },
+          settings: { ar: 'الإعدادات', en: 'Settings' },
+          share: { ar: 'مشاركة', en: 'Share' },
+          minimize: { ar: 'تصغير', en: 'Minimize' },
+          leave: { ar: 'مغادرة', en: 'Leave' },
+          report: { ar: 'إبلاغ', en: 'Report' },
+          clearChat: { ar: 'مسح الشات', en: 'Clear Chat' },
+          menu: { ar: 'القائمة', en: 'Menu' },
+          copied: { ar: 'تم النسخ!', en: 'Copied!' },
+          roomSettings: { ar: 'إعدادات الغرفة', en: 'Room Settings' },
+          music: { ar: 'موسيقى', en: 'Music' },
+          games: { ar: 'ألعاب', en: 'Games' },
+          title: { ar: 'عنوان الغرفة', en: 'Room Title' },
+          desc: { ar: 'الوصف', en: 'Description' },
+          pass: { ar: 'كلمة المرور (اختياري للقفل)', en: 'Password (Optional to lock)' },
+          save: { ar: 'حفظ', en: 'Save' },
+          uploadBg: { ar: 'تغيير الخلفية', en: 'Change Background' },
+          exitConfirm: { ar: 'هل أنت متأكد من الخروج؟', en: 'Are you sure you want to exit?' },
+          closeRoomConfirm: { ar: 'أنت المضيف. الخروج سيؤدي إلى إغلاق الغرفة وحذفها. هل أنت متأكد؟', en: 'You are the host. Exiting will CLOSE and DELETE the room. Are you sure?' },
+          confirm: { ar: 'تأكيد', en: 'Confirm' },
+          cancel: { ar: 'إلغاء', en: 'Cancel' }
+      };
+      return dict[key]?.[language] || key;
+  };
+
+  const getBubbleClass = (id?: string | null) => { 
+      if (!id) return 'bg-white/10 text-white rounded-2xl'; 
+      const item = storeItems.find(i => i.id === id); 
+      return item?.previewClass ? `${item.previewClass} rounded-2xl` : 'bg-white/10 text-white rounded-2xl'; 
+  };
+  
+  const getChatFrameClass = (id?: string | null) => {
+      if (!id) return 'border border-white/20';
+      const item = storeItems.find(i => i.id === id);
+      return item?.previewClass || 'border border-white/20';
+  };
+
   const filteredGifts = allGifts.filter(g => {
       if (giftCategory === 'cp') return g.category === 'cp';
       return g.type === giftTab && g.category !== 'cp';
@@ -413,6 +591,7 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
           </div>
       ))}
 
+      {/* Header Bar... */}
       <div className="relative z-50 pt-safe-top px-3 pb-2 flex items-center justify-between gap-2 bg-gradient-to-b from-black/80 to-transparent w-full shrink-0 h-[60px]">
           <div className="flex items-center gap-2 min-w-0 flex-1 overflow-hidden">
             <div onClick={() => setShowRoomInfoModal(true)} className="flex items-center gap-2 bg-black/30 backdrop-blur px-2 py-1 rounded-xl border border-white/10 min-w-0 max-w-full cursor-pointer hover:bg-black/40 transition active:scale-95">
@@ -471,7 +650,6 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
                  />
              ))}
           </div>
-          {/* INCREASED GAP IN GRID */}
           <div className="grid grid-cols-5 gap-y-5 gap-x-3 justify-items-center w-full max-w-sm shrink-0">
              {seats.slice(1).map((seat) => (
                  <SeatItem 
@@ -540,12 +718,26 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
           {floatingHearts.map((h) => (<Heart key={h.id} className="absolute bottom-20 w-6 h-6 text-pink-500 fill-pink-500 animate-float pointer-events-none z-50 drop-shadow-lg" style={{ left: `${h.left}%` }}/>))}
           {/* Bottom Controls */}
           <div className="p-3 bg-black/60 backdrop-blur-md border-t border-white/10 flex items-center gap-3 shrink-0">
-              <button onClick={() => {}} className={`p-2 rounded-full shadow-lg transition duration-75 active:scale-95 ${mySeat?.isMuted ? 'bg-red-500 text-white' : 'bg-white/10 text-white hover:bg-white/20'}`}>{mySeat?.isMuted ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}</button>
-              <button onClick={() => {}} className={`p-2 rounded-full shadow-lg transition ${isSpeakerMuted ? 'bg-gray-700 text-gray-400' : 'bg-white/10 text-brand-400 hover:bg-white/20'}`}>{isSpeakerMuted ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}</button>
+              <button onClick={handleMicToggle} className={`p-2 rounded-full shadow-lg transition duration-75 active:scale-95 ${mySeat?.isMuted ? 'bg-red-500 text-white' : 'bg-white/10 text-white hover:bg-white/20'}`}>{mySeat?.isMuted ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}</button>
+              <button onClick={handleSpeakerToggle} className={`p-2 rounded-full shadow-lg transition ${isSpeakerMuted ? 'bg-gray-700 text-gray-400' : 'bg-white/10 text-brand-400 hover:bg-white/20'}`}>{isSpeakerMuted ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}</button>
               <button onClick={() => setShowGiftPanel(true)} disabled={isSendingGift} className="p-2 rounded-full bg-gradient-to-r from-pink-500 to-rose-500 text-white shadow-lg shadow-pink-500/20 hover:scale-105 transition disabled:opacity-50"><GiftIcon className="w-5 h-5" /></button>
               <div className="flex-1 relative">
-                  <input ref={chatInputRef} type="text" value={inputValue} onChange={(e) => setInputValue(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && {}} placeholder={t('placeholder')} className={`w-full bg-white/10 border border-white/10 rounded-full py-2.5 px-4 text-sm text-white focus:border-brand-500 outline-none placeholder-gray-400 ${language === 'ar' ? 'text-right' : 'text-left'}`}/>
-                  <button onClick={() => {}} disabled={!inputValue.trim()} className="absolute right-2 top-1.5 p-1.5 bg-brand-600 rounded-full text-white disabled:opacity-0 transition hover:bg-brand-500 rtl:right-auto rtl:left-2"><Send className="w-3.5 h-3.5 rtl:rotate-180" /></button>
+                  <input 
+                    ref={chatInputRef} 
+                    type="text" 
+                    value={inputValue} 
+                    onChange={(e) => setInputValue(e.target.value)} 
+                    onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()} 
+                    placeholder={t('placeholder')} 
+                    className={`w-full bg-white/10 border border-white/10 rounded-full py-2.5 px-4 text-sm text-white focus:border-brand-500 outline-none placeholder-gray-400 ${language === 'ar' ? 'text-right' : 'text-left'}`}
+                  />
+                  <button 
+                    onClick={handleSendMessage} 
+                    disabled={!inputValue.trim()} 
+                    className="absolute right-2 top-1.5 p-1.5 bg-brand-600 rounded-full text-white disabled:opacity-0 transition hover:bg-brand-500 rtl:right-auto rtl:left-2"
+                  >
+                    <Send className="w-3.5 h-3.5 rtl:rotate-180" />
+                  </button>
               </div>
               <button onClick={() => setShowOptionsMenu(true)} className="p-2 rounded-full bg-white/10 text-white hover:bg-white/20"><LayoutGrid className="w-5 h-5" /></button>
           </div>
@@ -589,7 +781,6 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
                   <div className="flex-1 overflow-y-auto grid grid-cols-4 gap-3 pb-2 content-start custom-scrollbar">
                       {filteredGifts.map(gift => (
                           <button key={gift.id} onClick={() => setSelectedGift(gift)} disabled={isSendingGift} className={`flex flex-col items-center p-2 rounded-xl border transition relative group ${selectedGift?.id === gift.id ? 'border-brand-500 bg-brand-500/10' : 'border-transparent hover:bg-white/5'} ${isSendingGift ? 'opacity-50 cursor-not-allowed' : ''}`}>
-                              {/* RENDER GIFTS CORRECTLY: Use Image if svgaUrl/Base64/HTTP, else Text Emoji */}
                               {(gift.svgaUrl || gift.icon.startsWith('data:') || gift.icon.startsWith('http')) ? (
                                   <img src={gift.icon} className={`w-10 h-10 object-contain mb-1 transition ${selectedGift?.id === gift.id ? 'scale-110' : 'group-hover:scale-105'}`} />
                               ) : (
@@ -612,6 +803,146 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
               </div>
           </div>
       )}
+
+      {/* OPTIONS MENU (GRID BOX) */}
+      {showOptionsMenu && (
+          <div className="absolute inset-0 z-50 flex flex-col justify-end bg-black/60 backdrop-blur-sm animate-in slide-in-from-bottom-10" onClick={() => setShowOptionsMenu(false)}>
+              <div className="bg-gray-900 border-t border-white/10 rounded-t-3xl p-5 shadow-2xl relative" onClick={e => e.stopPropagation()}>
+                  <div className="flex justify-between items-center mb-4 border-b border-white/5 pb-2">
+                      <h3 className="text-white font-bold text-lg">{t('menu')}</h3>
+                      <button onClick={() => setShowOptionsMenu(false)} className="p-1 rounded-full hover:bg-white/10"><X className="w-5 h-5 text-gray-400"/></button>
+                  </div>
+                  
+                  <div className="grid grid-cols-4 gap-4">
+                      {/* Standard User Controls */}
+                      <button onClick={handleShareRoom} className="flex flex-col items-center gap-2 group">
+                          <div className="p-3 bg-white/5 rounded-2xl group-hover:bg-brand-600 group-hover:text-white transition text-brand-400 border border-white/5"><Share2 className="w-6 h-6"/></div>
+                          <span className="text-xs text-gray-400 group-hover:text-white">{t('share')}</span>
+                      </button>
+                      <button onClick={() => { setShowMusicPlaylist(true); setShowOptionsMenu(false); }} className="flex flex-col items-center gap-2 group">
+                          <div className="p-3 bg-white/5 rounded-2xl group-hover:bg-purple-600 group-hover:text-white transition text-purple-400 border border-white/5"><Music className="w-6 h-6"/></div>
+                          <span className="text-xs text-gray-400 group-hover:text-white">{t('music')}</span>
+                      </button>
+                      <button onClick={() => { setShowGamesModal(true); setShowOptionsMenu(false); }} className="flex flex-col items-center gap-2 group">
+                          <div className="p-3 bg-white/5 rounded-2xl group-hover:bg-yellow-600 group-hover:text-white transition text-yellow-400 border border-white/5"><Gamepad2 className="w-6 h-6"/></div>
+                          <span className="text-xs text-gray-400 group-hover:text-white">{t('games')}</span>
+                      </button>
+                      <button onClick={handleClearChat} className="flex flex-col items-center gap-2 group">
+                          <div className="p-3 bg-white/5 rounded-2xl group-hover:bg-red-600 group-hover:text-white transition text-red-400 border border-white/5"><RefreshCw className="w-6 h-6"/></div>
+                          <span className="text-xs text-gray-400 group-hover:text-white">{t('clearChat')}</span>
+                      </button>
+
+                      {/* Admin/Host Controls */}
+                      {(room.hostId === currentUser.id || room.admins?.includes(currentUser.uid || '')) && (
+                          <button onClick={() => { setShowRoomSettings(true); setShowOptionsMenu(false); }} className="flex flex-col items-center gap-2 group">
+                              <div className="p-3 bg-white/5 rounded-2xl group-hover:bg-blue-600 group-hover:text-white transition text-blue-400 border border-white/5"><Settings className="w-6 h-6"/></div>
+                              <span className="text-xs text-gray-400 group-hover:text-white">{t('roomSettings')}</span>
+                          </button>
+                      )}
+                  </div>
+              </div>
+          </div>
+      )}
+
+      {/* GAMES MODAL */}
+      {showGamesModal && (
+          <div className="absolute inset-0 z-[60] flex items-center justify-center bg-black/85 backdrop-blur-sm p-4 animate-in fade-in">
+              <div className="w-full max-w-sm bg-gray-900 border border-purple-500/30 rounded-3xl overflow-hidden shadow-2xl">
+                  <div className="p-4 bg-purple-900/20 border-b border-purple-500/20 flex justify-between items-center">
+                      <h3 className="text-purple-300 font-bold flex items-center gap-2"><Gamepad2 className="w-5 h-5"/> {t('games')}</h3>
+                      <button onClick={() => setShowGamesModal(false)}><X className="w-5 h-5 text-gray-400"/></button>
+                  </div>
+                  <div className="p-4 grid grid-cols-2 gap-3">
+                      <button onClick={() => { setShowFruitWar(true); setShowGamesModal(false); }} className="aspect-square bg-gray-800 rounded-2xl flex flex-col items-center justify-center gap-2 hover:bg-gray-700 transition border border-white/5 relative overflow-hidden group">
+                          <div className="absolute inset-0 bg-[url('https://images.unsplash.com/photo-1610832958506-aa56368176cf?q=80&w=300')] bg-cover opacity-40 group-hover:scale-110 transition duration-500"></div>
+                          <div className="relative z-10 bg-black/50 p-3 rounded-full backdrop-blur-sm"><span className="text-3xl">🍒</span></div>
+                          <span className="relative z-10 font-bold text-white text-sm">Fruit War</span>
+                      </button>
+                      {/* UNLOCKED BUTTON - Previously Disabled */}
+                      <button onClick={() => { alert('Coming Soon!'); setShowGamesModal(false); }} className="aspect-square bg-gray-800 rounded-2xl flex flex-col items-center justify-center gap-2 border border-white/5 hover:bg-gray-700 transition relative overflow-hidden group cursor-pointer">
+                          <span className="text-3xl">🎡</span>
+                          <span className="font-bold text-white text-sm">Lucky Wheel</span>
+                      </button>
+                  </div>
+              </div>
+          </div>
+      )}
+
+      {/* ... (rest of modals like exit confirmation) ... */}
+      {showExitModal && (
+          <div className="absolute inset-0 z-[100] flex items-center justify-center bg-black/85 backdrop-blur-sm p-4 animate-in fade-in">
+              <div className="w-full max-w-xs bg-gray-900 border border-gray-700 rounded-3xl overflow-hidden shadow-2xl text-center">
+                  <div className="p-6">
+                      <div className="w-16 h-16 bg-red-900/30 rounded-full flex items-center justify-center mx-auto mb-4 border border-red-500/30">
+                          <LogOut className="w-8 h-8 text-red-500" />
+                      </div>
+                      <h3 className="text-white font-bold text-lg mb-2">{t('exitConfirm')}</h3>
+                      {room.hostId === currentUser.id && (
+                          <p className="text-red-400 text-xs mb-4">{t('closeRoomConfirm')}</p>
+                      )}
+                      
+                      <div className="flex gap-3">
+                          <button 
+                              onClick={() => setShowExitModal(false)}
+                              className="flex-1 py-3 rounded-xl bg-gray-800 text-gray-400 font-bold hover:bg-gray-700"
+                          >
+                              {t('cancel')}
+                          </button>
+                          <button 
+                              onClick={handleConfirmExit}
+                              className="flex-1 py-3 rounded-xl bg-red-600 text-white font-bold hover:bg-red-500 shadow-lg"
+                          >
+                              {t('confirm')}
+                          </button>
+                      </div>
+                  </div>
+              </div>
+          </div>
+      )}
+
+      {showRoomSettings && (
+          <div className="absolute inset-0 z-[60] flex items-center justify-center bg-black/85 backdrop-blur-sm p-4 animate-in zoom-in-95">
+              <div className="w-full max-w-sm bg-gray-900 border border-gray-700 rounded-3xl overflow-hidden shadow-2xl">
+                  <div className="p-4 border-b border-gray-800 flex justify-between items-center">
+                      <h3 className="text-white font-bold text-lg">{t('roomSettings')}</h3>
+                      <button onClick={() => setShowRoomSettings(false)} className="p-1 rounded-full hover:bg-white/10"><X className="w-5 h-5 text-gray-400"/></button>
+                  </div>
+                  <div className="p-6 space-y-4">
+                      <div>
+                          <label className="text-xs text-gray-400 mb-1 block font-bold">{t('title')}</label>
+                          <input type="text" value={editTitle} onChange={(e) => setEditTitle(e.target.value)} className="w-full bg-black/40 border border-gray-600 rounded-xl p-3 text-white focus:border-brand-500 outline-none text-sm"/>
+                      </div>
+                      <div>
+                          <label className="text-xs text-gray-400 mb-1 block font-bold">{t('desc')}</label>
+                          <textarea value={editDesc} onChange={(e) => setEditDesc(e.target.value)} rows={2} className="w-full bg-black/40 border border-gray-600 rounded-xl p-3 text-white focus:border-brand-500 outline-none text-sm resize-none"/>
+                      </div>
+                      <div>
+                          <label className="text-xs text-gray-400 mb-1 block font-bold">{t('pass')}</label>
+                          <div className="relative">
+                              <Lock className="absolute top-3 left-3 w-4 h-4 text-gray-500"/>
+                              <input type="text" value={newRoomPassword} onChange={(e) => setNewRoomPassword(e.target.value)} className="w-full bg-black/40 border border-gray-600 rounded-xl p-3 pl-10 text-white focus:border-brand-500 outline-none text-sm" placeholder="Leave empty to unlock"/>
+                          </div>
+                      </div>
+                      
+                      {/* Background Upload Section */}
+                      <div>
+                          <label className="text-xs text-gray-400 mb-1 block font-bold">{t('uploadBg')}</label>
+                          <label className="flex items-center justify-center w-full h-16 border-2 border-dashed border-gray-600 rounded-xl cursor-pointer hover:border-brand-500 bg-black/20">
+                              <div className="flex flex-col items-center">
+                                  <ImageIcon className="w-5 h-5 text-gray-400" />
+                                  <span className="text-[9px] text-gray-500 mt-1">Select Image</span>
+                              </div>
+                              <input type="file" accept="image/*" className="hidden" onChange={handleRoomBackgroundUpload} />
+                          </label>
+                      </div>
+
+                      <button onClick={handleSaveSettings} className="w-full py-3 bg-brand-600 hover:bg-brand-500 text-white rounded-xl font-bold shadow-lg mt-2">{t('save')}</button>
+                  </div>
+              </div>
+          </div>
+      )}
+
+      {showFruitWar && <FruitWarGame room={room} currentUser={currentUser} language={language} onClose={() => setShowFruitWar(false)} onUpdateBalance={() => { /* Balance updates via listener usually */ }} />}
 
       {selectedUser && (<UserProfileModal user={selectedUser} currentUser={currentUser} language={language} onClose={() => setSelectedUser(null)} onMessage={() => {}} onGift={() => { setGiftTargets([selectedUser.userId!]); setSelectedUser(null); setShowGiftPanel(true); }} onOpenFullProfile={() => {}} />)}
     </div>

@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { ArrowLeft, Check, Lock, ShoppingBag, Clock, Package, XCircle } from 'lucide-react';
 import { Language, User, StoreItem } from '../types';
@@ -63,19 +64,65 @@ const StoreView: React.FC<StoreViewProps> = ({ user, language, onBack, onUpdateU
 
   const handlePurchase = async (item: StoreItem) => {
       if (!user.uid) return;
+      
+      const price = item.price;
+      const currency = item.currency;
+      const currentBalance = currency === 'diamonds' ? (user.wallet?.diamonds || 0) : (user.wallet?.coins || 0);
+
+      if (currentBalance < price) {
+          alert(t('noFunds'));
+          return;
+      }
+
+      // --- OPTIMISTIC UI: UPDATE IMMEDIATELY ---
+      const newBalance = currentBalance - price;
+      const duration = 7 * 24 * 60 * 60 * 1000;
+      const currentExpiry = user.inventory?.[item.id] || 0;
+      const newExpiry = Math.max(currentExpiry, Date.now()) + duration;
+
+      const updatedUser = { ...user };
+      if (!updatedUser.wallet) updatedUser.wallet = { diamonds: 0, coins: 0 };
+      if (!updatedUser.inventory) updatedUser.inventory = {};
+
+      // Update Wallet
+      if (currency === 'diamonds') updatedUser.wallet.diamonds = newBalance;
+      else updatedUser.wallet.coins = newBalance;
+
+      // Update Inventory
+      updatedUser.inventory[item.id] = newExpiry;
+
+      // Auto-Equip on purchase if empty
+      if (item.type === 'frame' && !user.equippedFrame) updatedUser.equippedFrame = item.id;
+      if (item.type === 'bubble' && !user.equippedBubble) updatedUser.equippedBubble = item.id;
+      if (item.type === 'entry' && !user.equippedEntry) updatedUser.equippedEntry = item.id;
+
+      onUpdateUser(updatedUser); // Update Parent State Instantly
+      
       setLoading(item.id);
+      
+      // Background Call
       try {
           await purchaseStoreItem(user.uid, item, user);
-          alert(language === 'ar' ? 'تم الشراء بنجاح!' : 'Purchase successful!');
+          // Success is assumed, if fails, listener or next fetch will correct it
       } catch (e: any) {
-          alert(t('noFunds'));
+          // Revert logic could be complex, relying on listener to fix eventually
+          console.error("Purchase failed", e);
       }
       setLoading(null);
   };
 
   const handleEquip = async (itemId: string, type: 'frame' | 'bubble' | 'entry') => {
       if (!user.uid) return;
-      setLoading(itemId || 'default');
+      
+      // --- OPTIMISTIC UI: UPDATE IMMEDIATELY ---
+      const updatedUser = { ...user };
+      if (type === 'frame') updatedUser.equippedFrame = itemId;
+      if (type === 'bubble') updatedUser.equippedBubble = itemId;
+      if (type === 'entry') updatedUser.equippedEntry = itemId;
+      
+      onUpdateUser(updatedUser); // Instant Update
+
+      // Background Call
       try {
           const updates: Partial<User> = {};
           if (type === 'frame') updates.equippedFrame = itemId;
@@ -83,11 +130,9 @@ const StoreView: React.FC<StoreViewProps> = ({ user, language, onBack, onUpdateU
           if (type === 'entry') updates.equippedEntry = itemId;
           
           await updateUserProfile(user.uid, updates);
-          onUpdateUser({ ...user, ...updates });
       } catch (e) {
-          alert("Failed to equip");
+          console.error("Failed to equip", e);
       }
-      setLoading(null);
   };
 
   const renderStoreGrid = (type: 'frame' | 'bubble' | 'entry') => {

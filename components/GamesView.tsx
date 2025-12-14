@@ -56,7 +56,8 @@ const GamesView: React.FC<GamesViewProps> = ({ language, onBack, user }) => {
       insufficient: { ar: 'رصيد غير كاف', en: 'Insufficient Funds' },
       selectBet: { ar: 'اختر الرهان', en: 'Select Bet' },
       maintenance: { ar: 'عفواً، اللعبة في الصيانة حالياً 🛠️', en: 'Sorry, game is under maintenance 🛠️' },
-      closed: { ar: 'مغلق للصيانة', en: 'Maintenance' }
+      closed: { ar: 'مغلق للصيانة', en: 'Maintenance' },
+      open: { ar: 'مفتوح', en: 'Open' }
     };
     return dict[key][language];
   };
@@ -171,21 +172,21 @@ const GamesView: React.FC<GamesViewProps> = ({ language, onBack, user }) => {
       {/* Game Grid / Menu */}
       {!activeGame ? (
           <div className="flex-1 overflow-y-auto p-4 grid grid-cols-1 gap-4 relative z-10">
-            {/* Fruit War Entry Card - DISABLED / MAINTENANCE MODE */}
+            {/* Fruit War Entry Card - UNLOCKED */}
             <div 
-                onClick={() => alert(t('maintenance'))}
-                className="group relative h-48 rounded-3xl overflow-hidden cursor-not-allowed border-2 border-white/10 shadow-2xl grayscale opacity-80"
+                onClick={() => setActiveGame('fruit_war')}
+                className="group relative h-48 rounded-3xl overflow-hidden cursor-pointer border-2 border-brand-500/50 shadow-2xl hover:scale-[1.02] transition-transform"
             >
                 <img src="https://images.unsplash.com/photo-1610832958506-aa56368176cf?q=80&w=800&auto=format&fit=crop" className="absolute inset-0 w-full h-full object-cover" />
-                <div className="absolute inset-0 bg-black/60"></div>
+                <div className="absolute inset-0 bg-black/40 group-hover:bg-black/20 transition"></div>
                 <div className="absolute bottom-0 left-0 right-0 p-5">
                     <div className="flex justify-between items-end">
                         <div>
-                            <div className="text-4xl mb-2 filter drop-shadow-lg opacity-50">🎰 🍒 🍊</div>
-                            <h3 className="text-2xl font-black text-gray-300 drop-shadow-md">{t('fruitWar')}</h3>
+                            <div className="text-4xl mb-2 filter drop-shadow-lg animate-bounce">🎰 🍒 🍊</div>
+                            <h3 className="text-2xl font-black text-white drop-shadow-md">{t('fruitWar')}</h3>
                         </div>
-                        <button className="bg-gray-700 text-gray-400 px-6 py-2 rounded-full font-bold text-sm shadow-lg flex items-center gap-2 cursor-not-allowed border border-gray-600">
-                            <Lock className="w-4 h-4" /> {t('closed')}
+                        <button className="bg-brand-600 text-white px-6 py-2 rounded-full font-bold text-sm shadow-lg flex items-center gap-2 border border-brand-400 group-hover:bg-brand-500">
+                            <Play className="w-4 h-4 fill-white" /> {t('play')}
                         </button>
                     </div>
                 </div>

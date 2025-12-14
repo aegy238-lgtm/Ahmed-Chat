@@ -1,3 +1,4 @@
+
 import { 
   collection, 
   query, 
@@ -51,11 +52,15 @@ const MAX_ACCOUNTS = 2;
 const ACCOUNTS_KEY = 'flex_device_accounts';
 
 const checkCreationLimit = () => {
+    // Disabled limit for unrestricted access
+    return;
+    /*
     const stored = localStorage.getItem(ACCOUNTS_KEY);
     const count = stored ? parseInt(stored) : 0;
     if (count >= MAX_ACCOUNTS) {
         throw new Error("عفواً، لقد وصلت للحد الأقصى لإنشاء الحسابات (2 حساب فقط). غير مسموح بإنشاء أكثر.");
     }
+    */
 };
 
 const incrementCreationCount = () => {
@@ -122,7 +127,7 @@ export const loginWithEmail = async (email: string, pass: string) => {
 };
 
 export const registerWithEmail = async (email: string, pass: string) => {
-  // Allow admin email to bypass creation limit
+  // Check limit (Disabled now)
   if (email !== 'admin@flex.com') {
       checkCreationLimit(); 
   }
@@ -502,8 +507,16 @@ export const deleteGift = async (giftId: string) => {
     await deleteDoc(doc(db, 'gifts', giftId));
 };
 
+export const deleteStoreItem = async (itemId: string) => {
+    await deleteDoc(doc(db, 'store_items', itemId));
+};
+
 export const updateGift = async (giftId: string, data: Partial<Gift>) => {
     await updateDoc(doc(db, 'gifts', giftId), deepClean(data));
+};
+
+export const updateStoreItem = async (itemId: string, data: Partial<StoreItem>) => {
+    await updateDoc(doc(db, 'store_items', itemId), deepClean(data));
 };
 
 export const listenToDynamicGifts = (callback: (gifts: Gift[]) => void): Unsubscribe => {
@@ -778,6 +791,45 @@ export const takeSeat = async (roomId: string, seatIndex: number, user: User) =>
     });
 };
 
+// Move Seat Function (Swap or Jump)
+export const moveSeat = async (roomId: string, currentSeatIndex: number, targetSeatIndex: number, user: User) => {
+    const roomRef = doc(db, 'rooms', roomId);
+    await runTransaction(db, async (transaction) => {
+        const roomDoc = await transaction.get(roomRef);
+        if (!roomDoc.exists()) throw "Room does not exist";
+        const roomData = roomDoc.data() as Room;
+        let seats = [...roomData.seats];
+
+        // Validation
+        if (seats[targetSeatIndex]?.userId) throw "Target seat occupied";
+        if (seats[targetSeatIndex]?.isLocked && !user.isAdmin && user.id !== roomData.hostId) throw "Target seat locked";
+        if (seats[currentSeatIndex]?.userId !== user.id) throw "Not on source seat";
+
+        // Preserve current seat mute status
+        const isMuted = seats[currentSeatIndex].isMuted;
+
+        // Clear old seat
+        seats[currentSeatIndex] = sanitizeSeat({
+            ...seats[currentSeatIndex], 
+            userId: null, userName: null, userAvatar: null, frameId: null,
+            giftCount: 0, isMuted: false, vipLevel: 0, adminRole: null
+        });
+
+        // Fill new seat
+        seats[targetSeatIndex] = sanitizeSeat({
+            ...seats[targetSeatIndex], // keep index/lock status of target
+            userId: user.id, userName: user.name, userAvatar: user.avatar,
+            frameId: user.equippedFrame || null,
+            isMuted: isMuted, // Carry over mute status
+            giftCount: 0, // Reset session gifts on new seat
+            vipLevel: user.vipLevel || 0,
+            adminRole: user.adminRole || null
+        });
+
+        transaction.update(roomRef, { seats });
+    });
+};
+
 export const leaveSeat = async (roomId: string, user: User) => {
     const roomRef = doc(db, 'rooms', roomId);
     await runTransaction(db, async (transaction) => {
@@ -910,7 +962,7 @@ export const listenToMessages = (roomId: string, callback: (msgs: ChatMessage[])
 
 // --- Banners ---
 export const addBanner = async (imageUrl: string, title?: string, link?: string) => {
-    await addDoc(collection(db, 'banners'), { imageUrl, title, link, timestamp: Date.now() });
+    await addDoc(collection(db, 'banners'), deepClean({ imageUrl, title, link, timestamp: Date.now() }));
 };
 
 export const deleteBanner = async (bannerId: string) => {
