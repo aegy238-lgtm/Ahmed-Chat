@@ -65,6 +65,37 @@ const incrementCreationCount = () => {
 };
 
 // --- Helper to Sanitize Data for Firestore ---
+// Safely removes undefined values and handles circular references
+const deepClean = (obj: any, seen = new WeakSet()): any => {
+    if (obj === undefined) return undefined;
+    if (obj === null) return null;
+    // Handle primitives
+    if (typeof obj !== 'object') return obj;
+    // Handle Date
+    if (obj instanceof Date) return obj;
+
+    // Detect circular reference
+    if (seen.has(obj)) return undefined; 
+    seen.add(obj);
+
+    // Handle Arrays
+    if (Array.isArray(obj)) {
+        return obj.map(v => deepClean(v, seen)).filter(v => v !== undefined);
+    }
+
+    // Handle Plain Objects
+    const result: any = {};
+    for (const key in obj) {
+        if (Object.prototype.hasOwnProperty.call(obj, key)) {
+            const val = deepClean(obj[key], seen);
+            if (val !== undefined) {
+                result[key] = val;
+            }
+        }
+    }
+    return result;
+};
+
 // Ensure NO undefined values are passed to Firestore
 const sanitizeSeat = (seat: any): RoomSeat => ({
     index: Number(seat.index),
@@ -91,7 +122,10 @@ export const loginWithEmail = async (email: string, pass: string) => {
 };
 
 export const registerWithEmail = async (email: string, pass: string) => {
-  checkCreationLimit(); // Check limit before creating Auth user
+  // Allow admin email to bypass creation limit
+  if (email !== 'admin@flex.com') {
+      checkCreationLimit(); 
+  }
   return await createUserWithEmailAndPassword(auth, email, pass);
 };
 
@@ -107,15 +141,22 @@ export const getUserProfile = async (uid: string): Promise<User | null> => {
 };
 
 export const createUserProfile = async (uid: string, data: Partial<User>) => {
-  checkCreationLimit(); // Check limit before saving profile
+  // If not creating the official admin, check limit
+  if (data.id !== 'OFFECAL') {
+      checkCreationLimit(); 
+  }
 
   const displayId = Math.floor(100000 + Math.random() * 900000).toString();
+  
+  // Apply deepClean to input data first
+  const safeData = deepClean(data);
+
   const userData: User = {
     uid,
     id: displayId,
-    name: data.name || 'User',
-    email: data.email || undefined, // Save Email
-    avatar: data.avatar || '',
+    name: safeData.name || 'User',
+    email: safeData.email || undefined, // Save Email
+    avatar: safeData.avatar || '',
     level: 1,
     diamondsSpent: 0,
     diamondsReceived: 0,
@@ -138,18 +179,21 @@ export const createUserProfile = async (uid: string, data: Partial<User>) => {
     dailyProfit: 0,
     lastDailyReset: Date.now(),
     isWelcomeAgent: false,
-    ...data
+    ...safeData
   };
-  await setDoc(doc(db, 'users', uid), userData);
   
-  incrementCreationCount(); // Increment only after successful creation
+  // Final deep clean before saving
+  await setDoc(doc(db, 'users', uid), deepClean(userData));
+  
+  if (data.id !== 'OFFECAL') {
+      incrementCreationCount(); 
+  }
   return userData;
 };
 
 export const updateUserProfile = async (uid: string, data: Partial<User>) => {
   const docRef = doc(db, 'users', uid);
-  // Filter out undefined values
-  const cleanData = JSON.parse(JSON.stringify(data));
+  const cleanData = deepClean(data);
   await updateDoc(docRef, cleanData);
 };
 
@@ -157,11 +201,6 @@ export const updateUserProfile = async (uid: string, data: Partial<User>) => {
 export const deleteUserProfile = async (uid: string) => {
     // 1. Delete the user document
     await deleteDoc(doc(db, 'users', uid));
-    
-    // Note: We cannot delete the Auth record from client SDK without Admin SDK.
-    // However, deleting the profile effectively removes them from the app.
-    // Upon next login attempt, they will be treated as a new user (onboarding) 
-    // or if we implement checks, we can block recreation.
 };
 
 export const listenToUserProfile = (uid: string, callback: (user: User | null) => void): Unsubscribe => {
@@ -177,8 +216,6 @@ export const listenToUserProfile = (uid: string, callback: (user: User | null) =
                 vipLevel: 0,
                 vipExpiresAt: 0
             }).catch(console.error);
-            // The listener will fire again with updated data, so we don't need to callback manually here usually,
-            // but we pass the current data for now.
         }
 
         callback(userData);
@@ -198,11 +235,9 @@ export const searchUserByDisplayId = async (displayId: string): Promise<User | n
 // --- Welcome Agency System ---
 
 export const submitWelcomeRequest = async (agent: User, targetDisplayId: string) => {
-    // 1. Verify target user exists
     const targetUser = await searchUserByDisplayId(targetDisplayId);
     if (!targetUser) throw new Error("المستخدم غير موجود");
 
-    // 2. Create Request
     await addDoc(collection(db, 'welcome_requests'), {
         agentId: agent.uid,
         agentName: agent.name,
@@ -213,27 +248,21 @@ export const submitWelcomeRequest = async (agent: User, targetDisplayId: string)
 };
 
 export const listenToWelcomeRequests = (callback: (requests: WelcomeRequest[]) => void): Unsubscribe => {
-    // Removed orderBy('timestamp', 'desc') to prevent "requires an index" error.
-    // Sorting is done client-side.
     const q = query(collection(db, 'welcome_requests'), where('status', '==', 'pending'));
     return onSnapshot(q, (snap) => {
         const reqs: WelcomeRequest[] = [];
         snap.forEach(d => reqs.push({ id: d.id, ...d.data() } as WelcomeRequest));
-        // Client-side sort
         reqs.sort((a, b) => b.timestamp - a.timestamp);
         callback(reqs);
     });
 };
 
 export const approveWelcomeRequest = async (requestId: string, targetDisplayId: string) => {
-    // 1. Find User
     const user = await searchUserByDisplayId(targetDisplayId);
     if (!user || !user.uid) throw new Error("المستخدم المستهدف غير موجود");
 
     const batch = writeBatch(db);
     
-    // 2. Update User (VIP 5 + 20M Diamonds)
-    // VIP Expires in 7 Days (1 week)
     const oneWeek = 7 * 24 * 60 * 60 * 1000;
     const expiresAt = Date.now() + oneWeek;
 
@@ -245,11 +274,9 @@ export const approveWelcomeRequest = async (requestId: string, targetDisplayId: 
         'wallet.diamonds': increment(20000000)
     });
 
-    // 3. Mark Request Approved (or delete it to clean up)
     const reqRef = doc(db, 'welcome_requests', requestId);
     batch.update(reqRef, { status: 'approved' });
 
-    // 4. Send Notification
     const notifRef = collection(db, `users/${user.uid}/notifications`);
     batch.set(doc(notifRef), {
         id: Date.now().toString(),
@@ -270,7 +297,7 @@ export const rejectWelcomeRequest = async (requestId: string) => {
 // --- Profile Interactions (Lists & Visits) ---
 
 export const recordProfileVisit = async (targetUid: string, visitor: User) => {
-    if (!visitor.uid || visitor.uid === targetUid) return; // Don't record self visits
+    if (!visitor.uid || visitor.uid === targetUid) return;
 
     const visitorRef = doc(db, `users/${targetUid}/visitors`, visitor.uid);
     const targetUserRef = doc(db, 'users', targetUid);
@@ -280,15 +307,13 @@ export const recordProfileVisit = async (targetUid: string, visitor: User) => {
         const now = Date.now();
 
         if (visitDoc.exists()) {
-            // Update existing visit
             transaction.update(visitorRef, {
                 lastVisitTime: now,
                 visitCount: increment(1),
-                name: visitor.name, // Update name/avatar in case they changed
+                name: visitor.name,
                 avatar: visitor.avatar
             });
         } else {
-            // Create new visit
             const visitData: Visitor = {
                 uid: visitor.uid!,
                 name: visitor.name,
@@ -297,7 +322,6 @@ export const recordProfileVisit = async (targetUid: string, visitor: User) => {
                 visitCount: 1
             };
             transaction.set(visitorRef, visitData);
-            // Increment total visitors count on the user profile
             transaction.update(targetUserRef, { visitorsCount: increment(1) });
         }
     });
@@ -305,53 +329,37 @@ export const recordProfileVisit = async (targetUid: string, visitor: User) => {
 
 export const getUserList = async (uid: string, type: 'friends' | 'followers' | 'following' | 'visitors'): Promise<any[]> => {
     const colRef = collection(db, `users/${uid}/${type}`);
-    // Sort logic depends on type
     let q;
     if (type === 'visitors') {
         q = query(colRef, orderBy('lastVisitTime', 'desc'), limit(50));
     } else {
-        q = query(colRef, limit(50)); // Can add orderBy timestamp if available in future
+        q = query(colRef, limit(50)); 
     }
     
     const snap = await getDocs(q);
-    
-    // For friends/following/followers, we might only have IDs, so we need to fetch full profile or store snapshot.
-    // Assuming for now we stored basic info (name, avatar) when the relation was created.
-    // If not, we'd need to fetch user profiles. For Visitor, we store info.
-    
     const list: any[] = [];
     
-    // For lists that might just contain timestamps (like friends ref), we need to fetch user data
-    if (type === 'friends') { // Logic for friend document structure
+    if (type === 'friends') { 
        const userIds = snap.docs.map(d => d.id);
        if (userIds.length > 0) {
-           // Firestore 'in' query supports max 10
-           // Doing individual fetches for simplicity or batching in real app
            for (const id of userIds) {
                const p = await getUserProfile(id);
                if (p) list.push({ uid: p.uid, name: p.name, avatar: p.avatar });
            }
        }
     } else {
-       // Visitors and Request-Based lists usually have data embedded
        snap.forEach(d => list.push(d.data()));
     }
-    
     return list;
 };
 
 // Check Friendship Status
 export const checkFriendshipStatus = async (myUid: string, targetUid: string): Promise<'friends' | 'sent' | 'none'> => {
     if (!myUid || !targetUid) return 'none';
-    
-    // 1. Check if already friends
     const friendDoc = await getDoc(doc(db, `users/${myUid}/friends`, targetUid));
     if (friendDoc.exists()) return 'friends';
-
-    // 2. Check if request sent
     const reqDoc = await getDoc(doc(db, `users/${targetUid}/friendRequests`, myUid));
     if (reqDoc.exists()) return 'sent';
-
     return 'none';
 };
 
@@ -362,7 +370,7 @@ export const getAllUsers = async (): Promise<User[]> => {
 };
 
 export const adminUpdateUser = async (uid: string, data: Partial<User>) => {
-  await updateDoc(doc(db, 'users', uid), data);
+  await updateDoc(doc(db, 'users', uid), deepClean(data));
 };
 
 export const adminBanRoom = async (roomId: string, isBanned: boolean) => {
@@ -384,7 +392,6 @@ export const resetAllGhostUsers = async () => {
   const roomsSnap = await getDocs(collection(db, 'rooms'));
   const batch = writeBatch(db);
   
-  // Create clean empty seats array (default 10 seats + 1 host)
   const emptySeats = Array(11).fill(null).map((_, i) => ({ 
       index: i, 
       userId: null, 
@@ -399,7 +406,6 @@ export const resetAllGhostUsers = async () => {
   }));
 
   roomsSnap.docs.forEach(doc => {
-      // Force reset seats and viewer count for every room, resetting to default 10 seats configuration
       batch.update(doc.ref, { 
           seats: emptySeats,
           seatCount: 10,
@@ -442,7 +448,6 @@ export const updateRoomGameConfig = async (roomId: string, luck: number, mode: '
   });
 };
 
-// Deprecated in UI but kept for compatibility - redirects to full config update
 export const setRoomLuck = async (roomId: string, luckPercentage: number) => {
   await updateDoc(doc(db, 'rooms', roomId), { gameLuck: luckPercentage });
 };
@@ -486,11 +491,11 @@ export const resetAllRoomCups = async () => {
 // --- SVGA / Dynamic Items Management (Admin) ---
 
 export const addSvgaGift = async (gift: Gift) => {
-    await addDoc(collection(db, 'gifts'), gift);
+    await addDoc(collection(db, 'gifts'), deepClean(gift));
 };
 
 export const addSvgaStoreItem = async (item: StoreItem) => {
-    await addDoc(collection(db, 'store_items'), item);
+    await addDoc(collection(db, 'store_items'), deepClean(item));
 };
 
 export const deleteGift = async (giftId: string) => {
@@ -498,7 +503,7 @@ export const deleteGift = async (giftId: string) => {
 };
 
 export const updateGift = async (giftId: string, data: Partial<Gift>) => {
-    await updateDoc(doc(db, 'gifts', giftId), data);
+    await updateDoc(doc(db, 'gifts', giftId), deepClean(data));
 };
 
 export const listenToDynamicGifts = (callback: (gifts: Gift[]) => void): Unsubscribe => {
@@ -521,7 +526,7 @@ export const listenToDynamicStoreItems = (callback: (items: StoreItem[]) => void
 export const createRoom = async (title: string, thumbnail: string, host: User, hostUid: string, backgroundType: 'image' | 'video' = 'image') => {
     const roomRef = doc(collection(db, 'rooms'));
     const initialSeatCount = 10;
-    // Total seats = 1 (host) + seatCount
+    
     const newRoom: Room = {
         id: roomRef.id,
         displayId: host.id,
@@ -530,9 +535,9 @@ export const createRoom = async (title: string, thumbnail: string, host: User, h
         hostAvatar: host.avatar,
         hostId: host.id, 
         viewerCount: 0,
-        thumbnail, // Used as cover for list
-        backgroundImage: thumbnail, // Used for inside (can be video if type is video)
-        backgroundType: backgroundType, // Default image
+        thumbnail, 
+        backgroundImage: thumbnail, 
+        backgroundType: backgroundType, 
         tags: [],
         isAiHost: false,
         seatCount: initialSeatCount,
@@ -558,25 +563,24 @@ export const createRoom = async (title: string, thumbnail: string, host: User, h
         cupStartTime: Date.now(), 
         bannedUsers: {},
         admins: [],
-        gameLuck: 50, // Default fair luck
-        gameMode: 'FAIR', // Default mode
-        hookThreshold: 50000, // Default hook threshold
-        roomWealth: 0 // Initialize room wealth
+        gameLuck: 50, 
+        gameMode: 'FAIR', 
+        hookThreshold: 50000, 
+        roomWealth: 0 
     };
-    await setDoc(roomRef, newRoom);
+    
+    // Apply deepClean to the room object before saving
+    await setDoc(roomRef, deepClean(newRoom));
     return newRoom;
 };
 
 export const changeRoomSeatCount = async (roomId: string, currentSeats: RoomSeat[], newCount: number) => {
     const roomRef = doc(db, 'rooms', roomId);
-    // newCount is the number of audience seats (e.g., 10 or 15)
-    // total array size = newCount + 1 (Host is index 0)
     const totalSize = newCount + 1;
     
     let newSeats = [...currentSeats];
 
     if (totalSize > currentSeats.length) {
-        // Grow: Add new empty seats
         for (let i = currentSeats.length; i < totalSize; i++) {
             newSeats.push({
                 index: i,
@@ -592,13 +596,12 @@ export const changeRoomSeatCount = async (roomId: string, currentSeats: RoomSeat
             });
         }
     } else if (totalSize < currentSeats.length) {
-        // Shrink: Remove seats from the end
         newSeats = newSeats.slice(0, totalSize);
     }
 
     await updateDoc(roomRef, {
         seatCount: newCount,
-        seats: newSeats
+        seats: newSeats.map(sanitizeSeat)
     });
 };
 
@@ -627,13 +630,12 @@ export const getRoomsByHostId = async (hostUid: string): Promise<Room[]> => {
 };
 
 export const updateRoomDetails = async (roomId: string, updates: Partial<Room>) => {
-    await updateDoc(doc(db, 'rooms', roomId), updates);
+    await updateDoc(doc(db, 'rooms', roomId), deepClean(updates));
 };
 
 export const distributeRoomWealth = async (roomId: string, hostUid: string, targetDisplayId: string, amount: number) => {
     if (amount <= 0) throw new Error("Invalid amount");
 
-    // 1. Verify target user
     const targetUser = await searchUserByDisplayId(targetDisplayId);
     if (!targetUser || !targetUser.uid) throw new Error("Target user not found");
 
@@ -647,18 +649,12 @@ export const distributeRoomWealth = async (roomId: string, hostUid: string, targ
         
         const roomData = roomDoc.data() as Room;
         
-        // 2. Verify Host
-        
         const currentWealth = roomData.roomWealth || 0;
         if (currentWealth < amount) throw new Error("Insufficient room wealth");
 
-        // 3. Deduct from Room
         transaction.update(roomRef, { roomWealth: increment(-amount) });
-
-        // 4. Add to Target User
         transaction.update(targetUserRef, { 'wallet.diamonds': increment(amount) });
 
-        // 5. Record Transaction
         transaction.set(transactionRef, {
             id: transactionRef.id,
             targetUserName: targetUser.name,
@@ -726,7 +722,6 @@ export const takeSeat = async (roomId: string, seatIndex: number, user: User) =>
         const roomData = roomDoc.data() as Room;
         let seats = [...roomData.seats];
         
-        // Prevent double booking
         if (seats[seatIndex] && seats[seatIndex].userId && seats[seatIndex].userId !== user.id) {
              throw "Seat occupied";
         }
@@ -735,7 +730,6 @@ export const takeSeat = async (roomId: string, seatIndex: number, user: User) =>
              throw "Seat locked";
         }
         
-        // Remove from old seat if exists
         const currentSeatIndex = seats.findIndex(s => s.userId === user.id);
         if (currentSeatIndex !== -1) {
             seats[currentSeatIndex] = sanitizeSeat({
@@ -752,7 +746,6 @@ export const takeSeat = async (roomId: string, seatIndex: number, user: User) =>
             });
         }
 
-        // Initialize seat if undefined
         if (!seats[seatIndex]) {
             seats[seatIndex] = {
                 index: seatIndex,
@@ -768,7 +761,6 @@ export const takeSeat = async (roomId: string, seatIndex: number, user: User) =>
             };
         }
 
-        // Assign new seat - EXPLICIT NULLS for safety
         seats[seatIndex] = sanitizeSeat({
             index: seatIndex,
             userId: user.id,
@@ -876,10 +868,8 @@ export const toggleSeatMute = async (roomId: string, seatIndex: number, isMuted:
 };
 
 export const banUserFromRoom = async (roomId: string, userId: string, durationInMinutes: number) => {
-    // durationInMinutes: -1 for permanent, else minutes
     const expiry = durationInMinutes === -1 ? -1 : Date.now() + (durationInMinutes * 60 * 1000);
     
-    // Using dot notation for nested map update
     await updateDoc(doc(db, 'rooms', roomId), {
         [`bannedUsers.${userId}`]: expiry
     });
@@ -905,12 +895,7 @@ export const removeRoomAdmin = async (roomId: string, userId: string) => {
 
 // --- Messaging ---
 export const sendMessage = async (roomId: string, message: ChatMessage) => {
-    const cleanMessage = { ...message };
-    // Ensure no undefined
-    Object.keys(cleanMessage).forEach(key => {
-        if ((cleanMessage as any)[key] === undefined) (cleanMessage as any)[key] = null;
-    });
-
+    const cleanMessage = deepClean(message);
     await addDoc(collection(db, `rooms/${roomId}/messages`), cleanMessage);
 };
 
@@ -973,7 +958,6 @@ export const purchaseStoreItem = async (uid: string, item: StoreItem, currentUse
 
 // --- Wallet & Exchange & Games ---
 export const updateWalletForGame = async (uid: string, amount: number) => {
-    // Amount can be negative (bet) or positive (winnings)
     const userRef = doc(db, 'users', uid);
     
     await runTransaction(db, async (transaction) => {
@@ -985,13 +969,11 @@ export const updateWalletForGame = async (uid: string, amount: number) => {
         const lastReset = userData.lastDailyReset || 0;
         const now = Date.now();
         
-        // Reset daily profit if 24h passed
         if (now - lastReset > 24 * 60 * 60 * 1000) {
             dailyProfit = 0;
             transaction.update(userRef, { lastDailyReset: now });
         }
         
-        // If amount is positive (win), add to dailyProfit
         if (amount > 0) {
             dailyProfit += amount;
         }
@@ -1064,16 +1046,14 @@ export const listenToNotifications = (uid: string, type: 'system' | 'official', 
     }
 };
 
-// UPDATED: Return detailed counts for separate badges
 export const listenToUnreadNotifications = (uid: string, callback: (counts: { system: number, official: number, total: number }) => void): Unsubscribe => {
     let systemCount = 0;
     let broadcastCount = 0;
-    let currentBroadcastSnap: any = null; // Hold reference to snapshot
+    let currentBroadcastSnap: any = null; 
 
     const calculateBroadcasts = () => {
         if (!currentBroadcastSnap) return 0;
         const lastRead = parseInt(localStorage.getItem(`last_broadcast_read_${uid}`) || '0');
-        // Filter docs based on timestamp vs lastRead
         return currentBroadcastSnap.docs.filter((doc: any) => doc.data().timestamp > lastRead).length;
     };
 
@@ -1081,14 +1061,12 @@ export const listenToUnreadNotifications = (uid: string, callback: (counts: { sy
         callback({ system: systemCount, official: broadcastCount, total: systemCount + broadcastCount });
     };
 
-    // 1. System Notifications (Firestore)
     const qSystem = query(collection(db, `users/${uid}/notifications`), where('read', '==', false));
     const unsubSystem = onSnapshot(qSystem, (snap) => {
         systemCount = snap.size;
         updateCallback();
     });
 
-    // 2. Official Broadcasts (Global + LocalStorage check)
     const qBroadcast = query(collection(db, 'broadcasts'), orderBy('timestamp', 'desc'), limit(10));
     const unsubBroadcast = onSnapshot(qBroadcast, (snap) => {
         currentBroadcastSnap = snap;
@@ -1096,7 +1074,6 @@ export const listenToUnreadNotifications = (uid: string, callback: (counts: { sy
         updateCallback();
     });
 
-    // 3. Listen for local read action (Custom Event)
     const handleLocalRead = () => {
         broadcastCount = calculateBroadcasts();
         updateCallback();
@@ -1110,7 +1087,6 @@ export const listenToUnreadNotifications = (uid: string, callback: (counts: { sy
     };
 };
 
-// NEW: Helper to mark broadcasts as read locally
 export const markOfficialMessagesRead = (uid: string) => {
     localStorage.setItem(`last_broadcast_read_${uid}`, Date.now().toString());
     window.dispatchEvent(new Event('flex_official_read'));
@@ -1281,13 +1257,12 @@ export const sendGiftTransaction = async (roomId: string, senderUid: string, tar
         contributors[senderKey].name = senderData.name;
         contributors[senderKey].avatar = senderData.avatar;
 
-        // NEW: Add 15% to Room Wealth
         const wealthContribution = Math.floor(cost * 0.15);
 
         transaction.update(roomRef, {
             contributors: contributors,
             cupStartTime: cupStart,
-            roomWealth: increment(wealthContribution) // Increment accumulated room wealth
+            roomWealth: increment(wealthContribution) 
         });
 
         const senderRef = doc(db, 'users', senderUid);
@@ -1347,7 +1322,6 @@ export const resetAllChats = async () => {
         const usersSnap = await getDocs(collection(db, 'users'));
         const chatIds = new Set<string>();
 
-        // 1. Delete all chat summaries from users profiles
         for (const userDoc of usersSnap.docs) {
             const chatsRef = collection(db, `users/${userDoc.id}/chats`);
             const chatsSnap = await getDocs(chatsRef);
@@ -1362,7 +1336,6 @@ export const resetAllChats = async () => {
             }
         }
 
-        // 2. Delete all messages from private_messages collection
         for (const chatId of chatIds) {
             const messagesRef = collection(db, `private_messages/${chatId}/messages`);
             const messagesSnap = await getDocs(messagesRef);

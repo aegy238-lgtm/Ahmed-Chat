@@ -332,6 +332,10 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
     try {
         const promises = targets.map(seat => sendGiftTransaction(room.id, currentUser.uid!, seat.index, selectedGift.cost * multiplier, selectedGift.id));
         await Promise.all(promises);
+        
+        // CLOSE PANEL HERE IMMEDIATELY AFTER SUCCESSFUL TRANSACTION
+        setShowGiftPanel(false); 
+
         let targetName = ''; if (giftTargets.includes('all')) targetName = t('everyone'); else if (targets.length === 1) targetName = targets[0].userName || 'User'; else targetName = `${targets.length} Users`;
         
         const giftMsg: ChatMessage = { 
@@ -350,7 +354,8 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
             vipLevel: currentUser.vipLevel || 0, 
             adminRole: currentUser.adminRole || null 
         };
-        setMessages(prev => [giftMsg, ...prev]); await sendMessage(room.id, giftMsg);
+        setMessages(prev => [giftMsg, ...prev]); 
+        sendMessage(room.id, giftMsg); // Don't await to keep UI responsive
         
         if (selectedGift.svgaUrl) {
             playDynamicEffect(selectedGift.svgaUrl);
@@ -359,7 +364,7 @@ export const RoomView: React.FC<RoomViewProps> = ({ room: initialRoom, currentUs
         } else {
             triggerFloatingHeart();
         }
-        setShowGiftPanel(false);
+        // Panel closed earlier
     } catch (e: any) { const msg = typeof e === 'string' ? e : (e.message || ''); if (msg.includes("Insufficient funds")) alert(t('noFunds')); } finally { setIsSendingGift(false); }
   };
 

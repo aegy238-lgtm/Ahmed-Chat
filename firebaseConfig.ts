@@ -2,15 +2,14 @@ import { initializeApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 
-// Real Firebase Configuration for Flex Fun (filex-fun)
+// Updated Firebase Configuration for ahmed-chat-eb4ec
 const firebaseConfig = {
-  apiKey: "AIzaSyBPilZsTihvQQOh0FYQw9k_MxuXXoLLg8U",
-  authDomain: "filex-fun.firebaseapp.com",
-  projectId: "filex-fun",
-  storageBucket: "filex-fun.firebasestorage.app",
-  messagingSenderId: "571151873178",
-  appId: "1:571151873178:web:3086edfd24d3ba53c49b23",
-  measurementId: "G-HN9X5LE4ZP"
+  apiKey: "AIzaSyB_Er2Sk6vGUP7K4gr6MZ7_QB7L0B8XU9I",
+  authDomain: "ahmed-chat-eb4ec.firebaseapp.com",
+  projectId: "ahmed-chat-eb4ec",
+  storageBucket: "ahmed-chat-eb4ec.firebasestorage.app",
+  messagingSenderId: "332694563568",
+  appId: "1:332694563568:web:92b55b27a86dc4e6b67035"
 };
 
 // Initialize Firebase
